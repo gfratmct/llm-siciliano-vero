@@ -23,25 +23,38 @@ Questa fonte raccoglie testi in italiano che verranno utilizzati per costruire i
 
 ### Installare dipendenze e dataset
 
-Assicurati di avere installati Python e gli strumenti di sistema `curl` e `gzip`. Dalla cartella principale del progetto, crea e attiva un virtualenv:
+Assicurati di avere installati Python **3.12**, `curl` e `gzip`. Dalla cartella principale del progetto, crea e attiva un virtualenv con Python 3.12:
 
 ```bash
-python3 -m venv .venv
+uv venv --python 3.12 .venv
 source .venv/bin/activate
 ```
 
-Installa quindi PyTorch manualmente scegliendo una sola variante:
-
-#### CPU-only
+Se non usi `uv`, crea un virtualenv con il tuo Python 3.12:
 
 ```bash
-pip install torch torchvision
+python3.12 -m venv .venv
+source .venv/bin/activate
 ```
 
-#### CUDA 12.8
+Installa quindi PyTorch **2.8.0** manualmente scegliendo la variante adatta al tuo sistema:
+
+#### macOS (Apple Silicon / MPS)
 
 ```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+pip install torch==2.8.0 torchvision==0.23.0
+```
+
+#### Linux + NVIDIA (CUDA 12.8)
+
+```bash
+pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu128
+```
+
+#### CPU-only (Linux/Windows senza GPU)
+
+```bash
+pip install torch==2.8.0 torchvision==0.23.0
 ```
 
 Infine installa le restanti dipendenze:
@@ -50,7 +63,7 @@ Infine installa le restanti dipendenze:
 pip install -r requirements.txt
 ```
 
-Le due varianti di PyTorch sono alternative e non vanno usate insieme. Se CUDA 12.8 non è compatibile con il sistema, usa la variante CPU.
+Le varianti di PyTorch sono alternative e non vanno usate insieme. Su macOS non esiste CUDA: si usa il backend **MPS** (verifica con `python -c "import torch; print(torch.backends.mps.is_available())"`). L'index `cu128` contiene solo wheel Linux.
 
 Scarica quindi il dataset ed estrai il corpus principale nella cartella `data/`:
 
