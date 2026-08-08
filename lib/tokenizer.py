@@ -1,33 +1,52 @@
+import os
 from typing import List
 
 from tokenizers import Tokenizer as BaseTokenizer
 
+PAD_TOKEN = "<pad>"
+UNK_TOKEN = "<unk>"
+SYSTEM_TOKEN = "<|system|>"
+USER_TOKEN = "<|user|>"
+ASSISTANT_TOKEN = "<|assistant|>"
+END_TURN_TOKEN = "<|end|>"
+SPECIAL_TOKENS = [
+    PAD_TOKEN,
+    UNK_TOKEN,
+    SYSTEM_TOKEN,
+    USER_TOKEN,
+    ASSISTANT_TOKEN,
+    END_TURN_TOKEN,
+]
+
+# If a tokenizer trained on the project corpus exists next to this module it is
+# used; otherwise we fall back to the pretrained GPT-2 tokenizer.
+_DEFAULT_TOKENIZER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tokenizer.json")
+
 
 class Tokenizer:
-    """Wrapper around the GPT-2 tokenizer with chat-oriented special tokens."""
+    """Wrapper around the GPT-2 / custom Italian tokenizer with chat special tokens."""
 
-    PAD_TOKEN = "<pad>"
-    UNK_TOKEN = "<unk>"
-    SYSTEM_TOKEN = "<|system|>"
-    USER_TOKEN = "<|user|>"
-    ASSISTANT_TOKEN = "<|assistant|>"
-    END_TURN_TOKEN = "<|end|>"
+    PAD_TOKEN = PAD_TOKEN
+    UNK_TOKEN = UNK_TOKEN
+    SYSTEM_TOKEN = SYSTEM_TOKEN
+    USER_TOKEN = USER_TOKEN
+    ASSISTANT_TOKEN = ASSISTANT_TOKEN
+    END_TURN_TOKEN = END_TURN_TOKEN
 
-    def __init__(self, model_name: str = "gpt2"):
-        self._tokenizer = BaseTokenizer.from_pretrained(model_name)
+    def __init__(self, model_name: str = "gpt2", tokenizer_path: str | None = None):
+        path = tokenizer_path or _DEFAULT_TOKENIZER_PATH
+        if os.path.exists(path):
+            self._tokenizer = BaseTokenizer.from_file(path)
+        else:
+            self._tokenizer = BaseTokenizer.from_pretrained(model_name)
         self._add_special_tokens()
 
     def _add_special_tokens(self) -> None:
-        """Register special tokens so they are encoded as single token IDs."""
-        special_tokens = [
-            self.PAD_TOKEN,
-            self.UNK_TOKEN,
-            self.SYSTEM_TOKEN,
-            self.USER_TOKEN,
-            self.ASSISTANT_TOKEN,
-            self.END_TURN_TOKEN,
-        ]
-        self._tokenizer.add_special_tokens(special_tokens)
+        """Register any special tokens that are not already in the vocabulary."""
+        existing = self._tokenizer.get_vocab()
+        missing = [tok for tok in SPECIAL_TOKENS if tok not in existing]
+        if missing:
+            self._tokenizer.add_special_tokens(missing)
 
     # Vocabulary / ID helpers
     @property

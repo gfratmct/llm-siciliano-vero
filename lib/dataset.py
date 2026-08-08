@@ -6,6 +6,7 @@ import pandas as pd
 
 import torch
 
+from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset, random_split
 
 from lib.tokenizer import Tokenizer
@@ -22,7 +23,14 @@ def _encode_corpus(corpus: str, tokenizer: Tokenizer) -> torch.Tensor:
     """Encode a large corpus in chunks, returning a flat int32 token tensor."""
     chunk_tensors = []
     total = 0
-    for start in range(0, len(corpus), _TOKENIZE_CHUNK_SIZE):
+    num_chunks = max(1, (len(corpus) + _TOKENIZE_CHUNK_SIZE - 1) // _TOKENIZE_CHUNK_SIZE)
+    for start in tqdm(
+        range(0, len(corpus), _TOKENIZE_CHUNK_SIZE),
+        total=num_chunks,
+        desc="Tokenizing corpus",
+        unit="chunk",
+        leave=False,
+    ):
         piece = corpus[start : start + _TOKENIZE_CHUNK_SIZE]
         encoding = tokenizer.encode(piece)
         chunk_tensors.append(torch.tensor(encoding.ids, dtype=torch.int32))
@@ -57,35 +65,67 @@ class DatasetReader:
             hasher.update(str(int(stat.st_mtime)).encode("utf-8"))
         return hasher.hexdigest()[:16]
 
+    def _clean_text(self, text: str) -> str:
+        """Remove HTML tags and noise markers, and normalize whitespace."""
+        text = re.sub(r"<[^>]+>", "", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        text = re.sub(r"##.*?##", "", text, flags=re.DOTALL)
+        return text
+
+    def read_file(self, file_path: str) -> str:
+        """Read and clean a single file."""
+        if ".parquet" in file_path:
+            return self._parquet_reader(file_path)
+        with open(file_path, "r", encoding="utf-8") as f:
+            return self._clean_text(f.read())
+
+    def iter_text_chunks(self, chunk_size: int = 10_000_000) -> iter:
+        """Yield cleaned text in fixed-size chunks, with byte-based progress bars.
+
+        Streaming keeps memory bounded when the corpus is many GB, and the bar
+        reflects actual bytes read instead of just whole files.
+        """
+        for file_path in self.get_paths():
+            total_bytes = os.path.getsize(file_path)
+            bar = tqdm(
+                total=total_bytes,
+                desc=f"Processing {os.path.basename(file_path)}",
+                unit="B",
+                unit_scale=True,
+                leave=False,
+            )
+            if ".parquet" in file_path:
+                df = pd.read_parquet(file_path)
+                for text_item in df["text"]:
+                    cleaned = self._clean_text(str(text_item))
+                    if cleaned:
+                        yield cleaned
+                    bar.update(len(str(text_item).encode("utf-8")))
+            else:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    while True:
+                        raw = f.read(chunk_size)
+                        if not raw:
+                            break
+                        cleaned = self._clean_text(raw)
+                        if cleaned:
+                            yield cleaned
+                        bar.update(len(raw.encode("utf-8")))
+            bar.close()
+
     def read(self) -> str:
         """Read raw files and return the cleaned corpus as a single string."""
-        file_paths = self.get_paths()
-        parts = []
+        parts = list(self.iter_text_chunks())
+        print(f"Corpus length: {sum(len(p) for p in parts) / 1e6:.0f}M chars across {len(self.get_paths())} files")
+        return "".join(parts)
 
-        for file_path in file_paths:
-            if ".parquet" in file_path:
-                parts.append(self._parquet_reader(file_path))
-            else:
-                ## raw read for other files - careful here
-                with open(file_path, "r", encoding="utf-8") as f:
-                    part = f.read()
-                    # do some cleaning here
-                    part = re.sub(r"<[^>]+>", "", part)
-                    part = re.sub(r"\s+", " ", part).strip()
-                    part = re.sub(r"##.*?##", "", part, flags=re.DOTALL)
-                    parts.append(part)
-
-        print(f"Corpus length: {len(parts)} files")
-
-        full_raw_text = "\n".join(parts)
-        return full_raw_text
-    
     def _parquet_reader(self, path: str) -> str:
         df = pd.read_parquet(path)
-        data = ""
-        for text_item in df["text"]:
-            data += text_item
-        return data
+        texts = df["text"]
+        chunks = []
+        for text_item in tqdm(texts, desc=f"Parquet: {os.path.basename(path)}", unit="row", leave=False):
+            chunks.append(str(text_item))
+        return "".join(chunks)
 
 
 class TextDataset(Dataset):
