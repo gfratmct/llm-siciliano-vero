@@ -97,13 +97,9 @@ class TransformerBlock(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, mask = None):
-        mha_output = self.mha(x, mask)
-        mha_output_dropout = self.dropout(mha_output)
-        attention_out = self.layer_norm_1(x + mha_output_dropout)
-
-        ff_out_attn = self.feed_forward(attention_out)
-        ff_out_attn_dropout = self.dropout(ff_out_attn)
-        ff_out = self.layer_norm_2(attention_out + ff_out_attn_dropout)
+        # Pre-LayerNorm: more stable for deep transformers trained from scratch.
+        attention_out = x + self.dropout(self.mha(self.layer_norm_1(x), mask))
+        ff_out = attention_out + self.dropout(self.feed_forward(self.layer_norm_2(attention_out)))
 
         return ff_out
     
@@ -119,11 +115,25 @@ class LLM(nn.Module):
             for _ in range(num_layers)
         ])
         self.fc_out = nn.Linear(embed_dim, vocab_size)
+        # Tie the output projection to the input embedding, standard for LLMs.
+        self.fc_out.weight = self.embedding.weight
         self.dropout = nn.Dropout(dropout)
         self.register_buffer(
             "causal_mask",
             torch.tril(torch.ones(max_seq_length, max_seq_length, dtype=torch.bool)),
         )
+
+        # Apply GPT-2-style weight initialization for stable training.
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        """Initialize weights following the GPT-2 / NanoGPT recipe."""
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     def forward(self, x, mask=None):
         x = self.embedding(x)

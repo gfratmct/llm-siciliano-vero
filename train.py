@@ -47,8 +47,9 @@ BATCH_SIZE = 32
 #   The model learns from blocks of this length at a time.
 BLOCK_SIZE = 256
 # LEARNING_RATE: step size used by the optimizer to update weights.
-#   If too high, training can diverge; if too low, convergence is slow.
-LEARNING_RATE = 3e-4
+#   Lowered from 3e-4 to reduce the risk of loss spikes/divergence on
+#   a 24-layer model trained from scratch with batch size 32.
+LEARNING_RATE = 1e-4
 # WEIGHT_DECAY: L2 regularization strength to prevent overfitting.
 #   Small weight decay helps keep model weights from growing too large.
 WEIGHT_DECAY = 0.01
@@ -195,12 +196,12 @@ def train_epoch(
         if scaler is not None:
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
             scaler.step(optimizer)
             scaler.update()
         else:
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
             optimizer.step()
 
         if scheduler is not None:
@@ -225,11 +226,12 @@ def train_epoch(
             print("---------------------\n")
 
         if (batch_idx + 1) % 20 == 0:
-            print(f"Epoch {epoch} | Batch {batch_idx + 1}/{len(dataloader)} | Loss {loss.item():.4f}")
+            print(f"Epoch {epoch} | Batch {batch_idx + 1}/{len(dataloader)} | Loss {loss.item():.4f} | GradNorm {grad_norm:.4f}")
             if wandb_run is not None:
                 wandb_run.log({
                     "train/batch_loss": loss.item(),
                     "train/lr": optimizer.param_groups[0]["lr"],
+                    "train/grad_norm": grad_norm,
                     "step": step_counter[0] if step_counter is not None else batch_idx,
                 })
 
@@ -378,9 +380,10 @@ def main() -> None:
     # AdamW is the standard optimizer for transformer training.
     # It decouples weight decay from the gradient update step.
     optimizer = AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-    # Warmup + cosine decay: 1% linear warmup, then cosine down to 5% of peak LR.
+    # Warmup + cosine decay: 5% linear warmup, then cosine down to 5% of peak LR.
+    # Longer warmup helps stabilize early training on deep transformers.
     total_steps = len(train_loader) * NUM_EPOCHS
-    warmup_steps = max(1, int(0.01 * total_steps))
+    warmup_steps = max(1, int(0.05 * total_steps))
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, make_lr_lambda(warmup_steps, total_steps))
     # CrossEntropyLoss combines LogSoftmax + NLLLoss in one function.
     # This is the standard loss for next-token prediction.
