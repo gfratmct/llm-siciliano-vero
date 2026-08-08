@@ -1,0 +1,29 @@
+[project]
+name = "llm-pelatone"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.5.1",
+    "pandas>=3.0.5",
+    "safetensors>=0.8.0",
+    "tokenizers>=0.23.1",
+    "torch>=2.11.0",
+    "torchvision>=0.26.0",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+# Try CUDA wheels first, then fall back to CPU builds if CUDA is unavailable.
+torch = [{ index = "pytorch-cuda" }, { index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cuda" }, { index = "pytorch-cpu" }]
