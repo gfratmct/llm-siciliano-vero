@@ -12,6 +12,10 @@ wheels/
 # Ignore all files in data/, but keep data/init.sh tracked.
 data/
 
+# Token cache and training checkpoints
+cache/
+runs/
+
 *.pt
 
 .DS_Store

@@ -1,4 +1,5 @@
 import glob
+import hashlib
 import os
 import re
 
@@ -23,6 +24,18 @@ class DatasetReader:
             file_paths.extend(glob.glob(pattern))
         return sorted(file_paths)
 
+    def fingerprint(self) -> str:
+        """Return a short hash of the data files, used to key the token cache on disk."""
+        hasher = hashlib.sha256()
+        for file_path in self.get_paths():
+            if not os.path.exists(file_path):
+                continue
+            stat = os.stat(file_path)
+            hasher.update(file_path.encode("utf-8"))
+            hasher.update(str(stat.st_size).encode("utf-8"))
+            hasher.update(str(int(stat.st_mtime)).encode("utf-8"))
+        return hasher.hexdigest()[:16]
+
     def read(self) -> list[str]:
         """Read raw files, clean their text, and return sentences."""
         file_paths = self.get_paths()
@@ -45,35 +58,53 @@ class DatasetReader:
 
 
 class TextDataset(Dataset):
-    def __init__(self, corpus: str, tokenizer: Tokenizer, block_size: int):
+    def __init__(self, corpus: str | None, tokenizer: Tokenizer, block_size: int, cache_path: str | None = None):
         self.block_size = block_size
-        self.examples = []
+        self.tokens = self._load_tokens(corpus, tokenizer, cache_path)
 
-        encoding = tokenizer.encode(corpus)
-        input_ids = torch.tensor(encoding.ids, dtype=torch.long)
-
-        if len(input_ids) < block_size:
+        if self.tokens.numel() < block_size + 1:
             raise ValueError("Corpus is too short for the requested block_size.")
 
-        for i in range(0, len(input_ids) - block_size + 1, block_size):
-            self.examples.append(input_ids[i : i + block_size])
+    def _load_tokens(self, corpus: str | None, tokenizer: Tokenizer, cache_path: str | None) -> torch.Tensor:
+        """Return the flat token ids, reading from cache when available or tokenizing once."""
+        if cache_path is not None and os.path.exists(cache_path):
+            print(f"Loaded {os.path.getsize(cache_path) / 1e6:.0f} MB token cache from {cache_path}")
+            return torch.load(cache_path, map_location="cpu", weights_only=True)
+
+        if corpus is None:
+            raise ValueError("No cached tokens found and no corpus provided.")
+
+        encoding = tokenizer.encode(corpus)
+        tokens = torch.tensor(encoding.ids, dtype=torch.int32)
+        print(f"Tokenized corpus: {tokens.numel() / 1e6:.0f}M tokens")
+
+        if cache_path is not None:
+            os.makedirs(os.path.dirname(cache_path) or ".", exist_ok=True)
+            torch.save(tokens, cache_path)
+            print(f"Cached tokens to {cache_path}")
+
+        return tokens
 
     def __len__(self) -> int:
-        return len(self.examples)
+        return (self.tokens.numel() - 1) // self.block_size
 
-    def __getitem__(self, idx: int) -> torch.Tensor:
-        return self.examples[idx]
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return (input, target) where each token predicts the next one."""
+        start = idx * self.block_size
+        chunk = self.tokens[start : start + self.block_size + 1]
+        return chunk[:-1].long(), chunk[1:].long()
 
 
 def load_text_datasets(
-    corpus: str,
+    corpus: str | None,
     tokenizer: Tokenizer,
     block_size: int,
     test_ratio: float = 0.1,
     seed: int = 42,
+    cache_path: str | None = None,
 ) -> tuple[Dataset, Dataset]:
     """Create train/test split datasets from the full dataset."""
-    full_dataset = TextDataset(corpus, tokenizer, block_size)
+    full_dataset = TextDataset(corpus, tokenizer, block_size, cache_path=cache_path)
     test_size = max(1, int(len(full_dataset) * test_ratio))
     train_size = len(full_dataset) - test_size
 
@@ -93,10 +124,23 @@ def create_dataloaders(
     test_dataset: Dataset,
     batch_size: int = 8,
     num_workers: int = 0,
+    pin_memory: bool = False,
 ) -> tuple[DataLoader, DataLoader]:
     """Wrap datasets with PyTorch DataLoader objects."""
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
     return train_loader, test_loader
 
 
@@ -119,11 +163,14 @@ if __name__ == "__main__":
     print(f"Tokenizer vocab size: {tokenizer.get_vocab_size()}")
 
     for batch_idx, batch in enumerate(train_loader):
-        print(f"Train batch {batch_idx} shape: {batch.shape}")
-        print(batch)
+        x, y = batch
+        print(f"Train batch {batch_idx} x shape: {x.shape}")
+        print(f"Train batch {batch_idx} y shape: {y.shape}")
+        print("x:", x)
+        print("y:", y)
         break
 
     for batch_idx, batch in enumerate(test_loader):
-        print(f"Test batch {batch_idx} shape: {batch.shape}")
-        print(batch)
+        x, y = batch
+        print(f"Test batch {batch_idx} x shape: {x.shape}")
         break

@@ -55,9 +55,11 @@ TEST_RATIO = 0.1
 # GRAD_CLIP_NORM: maximum gradient norm for gradient clipping.
 #   Clipping keeps gradient updates stable on deep transformer models.
 GRAD_CLIP_NORM = 1.0
-# NUM_WORKERS: number of subprocesses used by DataLoader.
-#   Set to 0 for compatibility; increase for faster loading on large datasets.
-NUM_WORKERS = 0
+# NUM_WORKERS: number of subprocesses used by DataLoader for prefetching.
+#   On Linux/CUDA this parallelizes data loading; set 0 if you hit issues.
+NUM_WORKERS = 4
+# PIN_MEMORY: use page-locked host memory for faster GPU transfers (CUDA only).
+PIN_MEMORY = True
 
 # Inference hyperparameters
 # GENERATE_MAX_TOKENS: maximum number of new tokens generated at inference time.
@@ -72,6 +74,9 @@ TOP_K = 50
 SEED = 42
 # CHECKPOINT_DIR: directory where model checkpoints are saved.
 CHECKPOINT_DIR = "runs"
+# CACHE_DIR: directory where the pre-tokenized corpus is cached to disk.
+#   Tokenizing the full corpus takes minutes, so a cache makes reruns instant.
+CACHE_DIR = "cache"
 # SAVE_EVERY_EPOCHS: save a checkpoint every N epochs during training.
 SAVE_EVERY_EPOCHS = 10
 
@@ -80,8 +85,7 @@ def set_seed(seed: int = 42):
     """Set random seed for reproducible training and evaluation."""
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.benchmark = True
 
 
 def get_device() -> torch.device:
@@ -89,11 +93,15 @@ def get_device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
 
 
-def shift_logits_and_labels(logits: torch.Tensor, labels: torch.Tensor):
-    """Prepare logits and labels for causal language modeling loss."""
-    shift_logits = logits[:, :-1, :].contiguous()
-    shift_labels = labels[:, 1:].contiguous()
-    return shift_logits, shift_labels
+def get_amp_config(device: torch.device) -> tuple[torch.dtype, torch.amp.GradScaler | None]:
+    """Return (autocast dtype, grad scaler) for mixed-precision training."""
+    if device.type == "cuda":
+        # bfloat16 is fast on RTX 30xx+ GPUs and needs no gradient scaling.
+        return torch.bfloat16, None
+    if device.type == "mps":
+        # Apple Silicon: float16 with gradient scaling.
+        return torch.float16, torch.amp.GradScaler("mps")
+    return torch.float32, None
 
 
 def train_epoch(
@@ -104,39 +112,49 @@ def train_epoch(
     device: torch.device,
     epoch: int,
     tokenizer: Tokenizer,
+    amp_dtype: torch.dtype,
+    scaler: torch.amp.GradScaler | None,
 ) -> float:
     """Train the model for one epoch and return the average loss."""
     model.train()
     total_loss = 0.0
     num_batches = 0
+    use_amp = amp_dtype != torch.float32
 
     for batch_idx, batch in enumerate(dataloader):
-        batch = batch.to(device)
+        x, y = batch
+        x = x.to(device, non_blocking=True)
+        y = y.to(device, non_blocking=True)
 
         # Forward pass: compute raw logits for each token in each sequence.
-        optimizer.zero_grad()
-        logits = model(batch)
-
-        # Shift the logits and labels so each input token predicts the next token.
-        shift_logits, shift_labels = shift_logits_and_labels(logits, batch)
-
-        # Flatten the predictions and labels to compute cross-entropy loss.
-        loss = criterion(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+        optimizer.zero_grad(set_to_none=True)
+        with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=use_amp):
+            logits = model(x)
+            # Targets are pre-shifted in the dataset, so each logit row directly
+            # predicts the next token without any extra copies in the loop.
+            loss = criterion(logits.view(-1, logits.size(-1)), y.view(-1))
 
         # Backpropagate gradients and update model weights.
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
-        optimizer.step()
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
+            optimizer.step()
 
         total_loss += loss.item()
         num_batches += 1
 
         # Print detailed debug information for the first batch of each epoch.
         if batch_idx == 0:
-            first_input_ids = batch[0].tolist()
-            first_target_ids = shift_labels[0].tolist()
+            first_input_ids = x[0].tolist()
+            first_target_ids = y[0].tolist()
             print("\n--- Debug batch 0 ---")
-            print(f"Batch shape: {batch.shape}")
+            print(f"Batch shape: {x.shape}")
             print(f"First example input ids: {first_input_ids}")
             print(f"First example input text: {tokenizer.decode(first_input_ids)}")
             print(f"First example target ids: {first_target_ids}")
@@ -155,19 +173,23 @@ def evaluate_model(
     dataloader: torch.utils.data.DataLoader,
     criterion: nn.Module,
     device: torch.device,
+    amp_dtype: torch.dtype,
 ) -> float:
     """Evaluate the model on the validation set and return the average loss."""
     model.eval()
     total_loss = 0.0
     num_batches = 0
+    use_amp = amp_dtype != torch.float32
 
     with torch.no_grad():
         for batch in dataloader:
-            batch = batch.to(device)
-            logits = model(batch)
+            x, y = batch
+            x = x.to(device, non_blocking=True)
+            y = y.to(device, non_blocking=True)
 
-            shift_logits, shift_labels = shift_logits_and_labels(logits, batch)
-            loss = criterion(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=use_amp):
+                logits = model(x)
+                loss = criterion(logits.view(-1, logits.size(-1)), y.view(-1))
 
             total_loss += loss.item()
             num_batches += 1
@@ -229,13 +251,23 @@ def main() -> None:
     device = get_device()
     print(f"Using device: {device}")
 
-    reader = DatasetReader("data/")
-    sentences = reader.read()
-    corpus = " ".join(sentences)
+    amp_dtype, scaler = get_amp_config(device)
+    print(f"Mixed precision: {'enabled (' + str(amp_dtype) + ')' if amp_dtype != torch.float32 else 'off'}")
 
-    if not corpus:
-        print("No text data was found. Using a fallback sample corpus.")
-        corpus = "This is a sample sentence for dataset loader testing. " * 40
+    reader = DatasetReader("data/")
+    cache_path = os.path.join(CACHE_DIR, f"tokens_{reader.fingerprint()}.pt")
+
+    # Skip the slow read + clean + tokenize steps entirely when the cache is warm.
+    if os.path.exists(cache_path):
+        corpus = None
+        print(f"Token cache hit: {cache_path}")
+    else:
+        sentences = reader.read()
+        corpus = " ".join(sentences)
+
+        if not corpus:
+            print("No text data was found. Using a fallback sample corpus.")
+            corpus = "This is a sample sentence for dataset loader testing. " * 40
 
     tokenizer = Tokenizer.from_pretrained("gpt2")
     print(f"Loaded GPT-2 tokenizer with vocab size {tokenizer.get_vocab_size()}")
@@ -257,6 +289,7 @@ def main() -> None:
         block_size=BLOCK_SIZE,
         test_ratio=TEST_RATIO,
         seed=SEED,
+        cache_path=cache_path,
     )
 
     # Wrap the datasets in DataLoader objects for batching and shuffling.
@@ -265,6 +298,7 @@ def main() -> None:
         test_dataset,
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
+        pin_memory=PIN_MEMORY and device.type == "cuda",
     )
 
     print(f"Train examples: {len(train_dataset)}")
@@ -283,8 +317,8 @@ def main() -> None:
 
     for epoch in range(1, NUM_EPOCHS + 1):
         start_time = time.time()
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, epoch, tokenizer)
-        val_loss = evaluate_model(model, test_loader, criterion, device)
+        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, epoch, tokenizer, amp_dtype, scaler)
+        val_loss = evaluate_model(model, test_loader, criterion, device, amp_dtype)
         epoch_time = time.time() - start_time
 
         print(f"Epoch {epoch}/{NUM_EPOCHS} | train_loss={train_loss:.4f} | val_loss={val_loss:.4f} | time={epoch_time:.1f}s")
