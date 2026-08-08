@@ -13,3 +13,5 @@ wheels/
 data/
 
 *.pt
+
+.DS_Store
