@@ -39,8 +39,9 @@ def safe_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
 #   If your corpus contains longer sequences, they will be truncated or split.
 #   This is the positional-encoding ceiling and must be >= BLOCK_SIZE.
 MAX_SEQUENCE_LENGTH = 4096
-# VOCAB_SIZE: GPT-2 tokenizer vocabulary size used by the model embedding layer.
-#   The embedding matrix must match the tokenizer vocabulary.
+# VOCAB_SIZE: fallback vocabulary size used only as a default; the actual size
+#   always comes from the trained tokenizer (lib/tokenizer.json), via
+#   tokenizer.vocab_size, so the embedding layer always matches the tokenizer.
 VOCAB_SIZE = 50257
 # EMBEDDING_DIM: hidden dimension size for token embeddings and transformer layers.
 #   Larger dims allow more expressive representations but increase compute.
@@ -366,7 +367,7 @@ def main() -> None:
             print("No text data was found. Using a fallback sample corpus.")
             corpus = "This is a sample sentence for dataset loader testing. " * 40
 
-    # Print an example of how raw text is tokenized by GPT-2 tokenizer.
+    # Print an example of how raw text is tokenized by the current tokenizer.
     sample_text = "The quick brown fox jumps over the lazy dog."
     sample_encoding = tokenizer.encode(sample_text)
     print("\n--- Tokenizer example ---")

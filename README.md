@@ -20,10 +20,12 @@ Lo snapshot di Wikipedia italiana è uno dei corpus in lingua italiana più gran
 
 ## Cosa fa questo progetto
 
-- `lib/dataset.py`: legge i file di testo dalla cartella `data/`, pulisce il testo e costruisce dataset a blocchi di token.
-- `lib/models.py`: definisce un piccolo modello Transformer autoregressivo.
+- `lib/dataset.py`: legge i file di testo dalla cartella `data/`, pulisce il testo e costruisce dataset a blocchi di token. Tutta la fase di lettura, pulizia e tokenizzazione mostra barre di avanzamento (`tqdm`).
+- `lib/models.py`: definisce un piccolo modello Transformer autoregressivo, più la funzione `resize_token_embeddings` per espandere il vocabolario quando si aggiungono token speciali.
+- `lib/tokenizer.py`: wrapper attorno al tokenizer (BPE byte-level) con i token speciali per la chat (`<|system|>`, `<|user|>`, `<|assistant|>`, `<|end|>`, `<pad>`, `<unk>`). Carica automaticamente un tokenizer generato su misura se esiste `lib/tokenizer.json`, altrimenti usa GPT-2 come fallback.
+- `scripts/train_tokenizer.py`: addestra un tokenizer BPE sul corpus italiano e lo salva in `lib/tokenizer.json`.
 - `train.py`: contiene il flusso di training, con spiegazioni passo passo e debug per mostrare come il modello predice il token successivo.
-- `app.py`: flusso di sola generazione, usa un checkpoint salvato (`best_model.pt`) per produrre testo a partire da un prompt.
+- `app.py`: flusso di sola generazione, usa un checkpoint salvato per produrre testo a partire da un prompt.
 
 ## Come usarlo
 
@@ -81,7 +83,25 @@ Lo script scarica gli archivi PAISA e decomprime `paisa.raw.utf8` direttamente i
 
 ### Preparare manualmente i dati (opzionale)
 
-Se non usi lo script di inizializzazione, metti i file di testo in `data/` con estensione `.utf8` e assicurati che il contenuto sia italiano.
+Se non usi lo script di inizializzazione, metti i file di testo in `data/` con estensione `.utf8` e assicurati che il contenuto sia italiano. I file `.parquet` (es. dump di Wikipedia) vanno posizionati in una sottocartella di `data/` (es. `data/20231101.it/`).
+
+### Addestrare il tokenizer (consigliato)
+
+Prima di allenare il modello, genera un tokenizer BPE addestrato sul tuo corpus italiano.Questo produce token più efficienti per l'italiano rispetto al tokenizer GPT-2 (che è ottimizzato per l'inglese) e include già i token speciali per la chat.
+
+```bash
+python scripts/train_tokenizer.py
+```
+
+Opzioni disponibili:
+
+```bash
+python scripts/train_tokenizer.py --vocab-size 50257 --data-dir data/ --output lib/tokenizer.json
+```
+
+Il tokenizer viene salvato in `lib/tokenizer.json` e viene caricato automaticamente da `lib/tokenizer.py` in tutti gli script del progetto. Durante l'addestramento del tokenizer vedrai barre di avanzamento per la lettura del corpus e le fasi interne del BPE (pre-processing, tokenize words, count pairs, compute merges).
+
+Se non addestri un tokenizer personalizzato, il progetto usa il fallback GPT-2 automaticamente.
 
 ### Allenare il modello
 
@@ -93,9 +113,9 @@ python train.py
 
 Questo script:
 
-- carica il dataset italiano
-- usa il tokenizer GPT-2 con `Tokenizer.from_pretrained("gpt2")`
-- crea blocchi di token per l'addestramento
+- carica il tokenizer (quello personalizzato in `lib/tokenizer.json` se presente, altrimenti GPT-2)
+- carica il dataset italiano (con barre di avanzamento su lettura e tokenizzazione)
+- crea blocchi di token per l'addestramento, con cache su disco keyed per fingerprint dei dati e dimensione del vocabolario
 - calcola la loss sulla predizione del token successivo
 - salva i checkpoint in `runs/`, compreso `runs/best_model.safetensors` e `runs/final_model.safetensors`
 
@@ -105,7 +125,7 @@ Questo script:
 python app.py
 ```
 
-Questo script carica il modello salvato, carica il tokenizer GPT-2 e genera testo a partire da un prompt.
+Questo script carica il modello salvato e il tokenizer, ridimensiona gli embedding per includere i token speciali (se necessario) e genera testo a partire da un prompt usando top-k, top-p e repetition penalty.
 
 ## Piano futuro
 

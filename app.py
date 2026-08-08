@@ -7,6 +7,8 @@ from safetensors.torch import load_file
 
 # Model hyperparameters
 MAX_SEQUENCE_LENGTH = 4096
+# Fallback vocab size used only when no checkpoint exists; the actual size
+# always comes from the trained tokenizer (see lib/tokenizer.json).
 VOCAB_SIZE = 50257
 EMBEDDING_DIM = 1024
 NUM_HEADS = 16
@@ -28,7 +30,7 @@ def get_device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def build_model(device: torch.device, vocab_size: int = VOCAB_SIZE) -> LLM:
+def build_model(device: torch.device, vocab_size: int) -> LLM:
     """Construct the transformer model and move it to the compute device."""
     model = LLM(
         embed_dim=EMBEDDING_DIM,
@@ -43,18 +45,17 @@ def build_model(device: torch.device, vocab_size: int = VOCAB_SIZE) -> LLM:
     return model.to(device)
 
 
-def load_checkpoint(model: LLM, checkpoint_path: str):
-    """Load saved weights if the checkpoint exists."""
-    if os.path.exists(checkpoint_path):
-        if checkpoint_path.endswith(".safetensors"):
-            state_dict = load_file(checkpoint_path)
-            model.load_state_dict(state_dict)
-        else:
-            model.load_state_dict(torch.load(checkpoint_path, map_location="cpu"))
-        model.eval()
-        print(f"Loaded model weights from {checkpoint_path}")
-    else:
+def load_state_dict(checkpoint_path: str) -> dict | None:
+    """Load a checkpoint state dict, returning None if the file is missing."""
+    if not os.path.exists(checkpoint_path):
         print(f"Checkpoint not found at {checkpoint_path}. Using randomly initialized model.")
+        return None
+    if checkpoint_path.endswith(".safetensors"):
+        state_dict = load_file(checkpoint_path)
+    else:
+        state_dict = torch.load(checkpoint_path, map_location="cpu")
+    print(f"Loaded model weights from {checkpoint_path}")
+    return state_dict
 
 
 def generate_text(
@@ -118,11 +119,23 @@ def main() -> None:
     tokenizer = Tokenizer()
     print(f"Loaded tokenizer with vocab size {tokenizer.get_vocab_size()}")
 
-    # Build with the original GPT-2 vocab size so the old checkpoint loads,
-    # then resize embeddings to include the new special tokens.
-    model = build_model(device, vocab_size=VOCAB_SIZE)
-    load_checkpoint(model, MODEL_CHECKPOINT)
+    # Load the checkpoint (if any) and read its embedding size so the model is
+    # built with a matching vocabulary. This works for both old GPT-2-sized
+    # checkpoints and for new ones trained with the custom tokenizer.
+    state_dict = load_state_dict(MODEL_CHECKPOINT)
+    ckpt_vocab_size = (
+        state_dict["embedding.weight"].shape[0] if state_dict is not None else tokenizer.vocab_size
+    )
+
+    model = build_model(device, vocab_size=ckpt_vocab_size)
+    if state_dict is not None:
+        model.load_state_dict(state_dict)
+        model.eval()
+
+    # Align the model vocabulary with the tokenizer: resize is a no-op when the
+    # checkpoint was already trained with the current tokenizer.
     resize_token_embeddings(model, tokenizer.vocab_size)
+    print(f"Model vocab size: {model.embedding.num_embeddings}")
 
     prompt = "Ciao sono Gabriele e nella vita faccio lo scritto, sta mattina "
     print("Prompt:", prompt)
