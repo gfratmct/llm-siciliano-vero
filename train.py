@@ -90,7 +90,8 @@ SAVE_EVERY_EPOCHS = 1
 WANDB_PROJECT = "llm-siciliano-vero"
 # WANDB_NAME: run name shown in the W&B dashboard (set None to auto-generate).
 WANDB_NAME = None
-
+# WANDB_ENTITY
+WANDB_ENTITY = "gfratmct-personal"
 
 def build_wandb_config() -> dict:
     """Collect every hyperparameter into a nested config for W&B."""
@@ -395,8 +396,7 @@ def main() -> None:
     # Weights & Biases: log all hyperparameters + train/val loss + LR.
     wandb_run = None
     try:
-        wandb_settings = wandb.Settings(base_url="http://0.0.0.0:8000")
-        wandb_run = wandb.init(project=WANDB_PROJECT, name=WANDB_NAME, config=build_wandb_config(), settings=wandb_settings)
+        wandb_run = wandb.init(entity=WANDB_ENTITY, project=WANDB_PROJECT, name=WANDB_NAME, config=build_wandb_config())
         wandb_run.config["num_train_examples"] = len(train_dataset)
         wandb_run.config["num_test_examples"] = len(test_dataset)
         wandb_run.config["num_parameters"] = sum(p.numel() for p in model.parameters())
