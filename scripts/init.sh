@@ -14,12 +14,13 @@ curl \
     --location \
     --remote-name-all \
     --output-dir "$DATA_DIR" \
-    'https://clarin.eurac.edu/repository/xmlui/bitstream/handle/20.500.12124/3{/paisa.raw.utf8.gz,/paisa.annotated.CoNLL.utf8.gz,/lemma-WITHOUTnumberssymbols-frequencies-paisa.txt.gz,/lemma-frequencies-paisa.txt.gz}'
+    'https://clarin.eurac.edu/repository/xmlui/bitstream/handle/20.500.12124/paisa.raw.utf8.gz'
 
 # unpack the dataset
 gzip -df "$DATA_DIR/paisa.raw.utf8.gz"
-# gzip -df "$DATA_DIR/paisa.annotated.CoNLL.utf8.gz"
-# gzip -df "$DATA_DIR/lemma-WITHOUTnumberssymbols-frequencies-paisa.txt.gz"
-# gzip -df "$DATA_DIR/lemma-frequencies-paisa.txt.gz"
+
+echo "Download now the wikipedia italian version..."
+
+hf download wikimedia/wikipedia --repo-type dataset --include "20231101.it/*.parquet" --local-dir $DATA_DIR
 
 echo "Download completed in $DATA_DIR"

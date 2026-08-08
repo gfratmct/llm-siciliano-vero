@@ -12,6 +12,12 @@ Il dataset di base proviene da:
 
 Questa fonte raccoglie testi in italiano che verranno utilizzati per costruire il corpus di addestramento. Il progetto mira a mantenere un dataset italiano puro e rappresentativo.
 
+Come riferimento per ampliare il corpus con più dati grezzi in italiano:
+
+- https://dumps.wikimedia.org/itwiki/ (dump completo di Wikipedia in italiano)
+
+Lo snapshot di Wikipedia italiana è uno dei corpus in lingua italiana più grandi e variegati disponibili gratuitamente. Puoi scaricare il dump `pages-articles` e processarlo con tool come `wikiextractor` per estrarre il testo pulito da aggiungere alla cartella `data/`.
+
 ## Cosa fa questo progetto
 
 - `lib/dataset.py`: legge i file di testo dalla cartella `data/`, pulisce il testo e costruisce dataset a blocchi di token.

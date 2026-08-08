@@ -2,12 +2,13 @@ import glob
 import hashlib
 import os
 import re
+import pandas as pd
 
 import torch
 
 from torch.utils.data import DataLoader, Dataset, random_split
 
-from tokenizers import Tokenizer
+from lib.tokenizer import Tokenizer
 
 # Encode the corpus in chunks of this many characters so peak memory stays
 # bounded. Encoding the whole corpus at once materializes a Python list of
@@ -31,14 +32,14 @@ def _encode_corpus(corpus: str, tokenizer: Tokenizer) -> torch.Tensor:
 
 
 class DatasetReader:
-    whitelist_extensions = [".utf8"]
+    whitelist_extensions = [".utf8", ".parquet"]
 
     def __init__(self, data_dir: str):
         self.data_dir = data_dir
 
     def get_paths(self) -> list[str]:
         """Return all supported text file paths from the configured data directory."""
-        patterns = [os.path.join(self.data_dir, f"*{ext}") for ext in self.whitelist_extensions]
+        patterns = [os.path.join(self.data_dir, f"*/*{ext}") for ext in self.whitelist_extensions]
         file_paths = []
         for pattern in patterns:
             file_paths.extend(glob.glob(pattern))
@@ -62,18 +63,29 @@ class DatasetReader:
         parts = []
 
         for file_path in file_paths:
-            with open(file_path, "r", encoding="utf-8") as f:
-                parts.append(f.read())
+            if ".parquet" in file_path:
+                parts.append(self._parquet_reader(file_path))
+            else:
+                ## raw read for other files - careful here
+                with open(file_path, "r", encoding="utf-8") as f:
+                    part = f.read()
+                    # do some cleaning here
+                    part = re.sub(r"<[^>]+>", "", part)
+                    part = re.sub(r"\s+", " ", part).strip()
+                    part = re.sub(r"##.*?##", "", part, flags=re.DOTALL)
+                    parts.append(part)
 
         print(f"Corpus length: {len(parts)} files")
 
         full_raw_text = "\n".join(parts)
-
-        cleaned_text = re.sub(r"<[^>]+>", "", full_raw_text)
-        cleaned_text = re.sub(r"\s+", " ", cleaned_text).strip()
-        cleaned_text = re.sub(r"##.*?##", "", cleaned_text, flags=re.DOTALL)
-
-        return cleaned_text
+        return full_raw_text
+    
+    def _parquet_reader(self, path: str) -> str:
+        df = pd.read_parquet(path)
+        data = ""
+        for text_item in df["text"]:
+            data += text_item
+        return data
 
 
 class TextDataset(Dataset):
@@ -169,7 +181,7 @@ if __name__ == "__main__":
         print("No data files found in data/. Using a small sample corpus for test execution.")
         corpus = "This is a sample sentence for dataset loader testing. " * 20
 
-    tokenizer = Tokenizer.from_pretrained("gpt2")
+    tokenizer = Tokenizer()
     block_size = 32
     train_dataset, test_dataset = load_text_datasets(corpus, tokenizer, block_size, test_ratio=0.2)
     train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, batch_size=2)

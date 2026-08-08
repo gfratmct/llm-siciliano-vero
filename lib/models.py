@@ -4,6 +4,27 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
+def resize_token_embeddings(model: nn.Module, new_vocab_size: int) -> None:
+    """Resize the model's input embedding and re-tie the output projection."""
+    old_vocab_size = model.embedding.num_embeddings
+    embed_dim = model.embedding.embedding_dim
+
+    if old_vocab_size == new_vocab_size:
+        return
+
+    new_embedding = nn.Embedding(new_vocab_size, embed_dim)
+    with torch.no_grad():
+        new_embedding.weight[:old_vocab_size] = model.embedding.weight
+        nn.init.normal_(
+            new_embedding.weight[old_vocab_size:],
+            mean=0.0,
+            std=0.02,
+        )
+
+    model.embedding = new_embedding
+    model.fc_out.weight = model.embedding.weight
+
 class PositionalEncoding(nn.Module):
     def __init__(self, embed_dim: int, max_seq_length: int = 512):
         super(PositionalEncoding, self).__init__()

@@ -11,7 +11,7 @@ import wandb
 
 from lib.dataset import DatasetReader, load_text_datasets, create_dataloaders
 from lib.models import LLM
-from tokenizers import Tokenizer
+from lib.tokenizer import Tokenizer
 
 
 def safe_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
@@ -114,12 +114,12 @@ WANDB_NAME = None
 # WANDB_ENTITY
 WANDB_ENTITY = "gfratmct-personal"
 
-def build_wandb_config() -> dict:
+def build_wandb_config(vocab_size: int) -> dict:
     """Collect every hyperparameter into a nested config for W&B."""
     return {
         "model": {
             "max_sequence_length": MAX_SEQUENCE_LENGTH,
-            "vocab_size": VOCAB_SIZE,
+            "vocab_size": vocab_size,
             "embedding_dim": EMBEDDING_DIM,
             "num_heads": NUM_HEADS,
             "num_layers": NUM_LAYERS,
@@ -322,14 +322,14 @@ def generate_text(
     return tokenizer.decode(generated_ids)
 
 
-def build_model(device: torch.device) -> nn.Module:
+def build_model(device: torch.device, vocab_size: int = VOCAB_SIZE) -> nn.Module:
     """Construct the transformer language model and move it to the target device."""
     model = LLM(
         embed_dim=EMBEDDING_DIM,
         num_heads=NUM_HEADS,
         num_layers=NUM_LAYERS,
         hidden_size=EMBEDDING_DIM * 4,
-        vocab_size=VOCAB_SIZE,
+        vocab_size=vocab_size,
         max_seq_length=MAX_SEQUENCE_LENGTH,
         dropout=DROP_RATE,
         qkv_bias=QKV_BIAS,
@@ -347,7 +347,13 @@ def main() -> None:
     print(f"Mixed precision: {'enabled (' + str(amp_dtype) + ')' if amp_dtype != torch.float32 else 'off'}")
 
     reader = DatasetReader("data/")
-    cache_path = os.path.join(CACHE_DIR, f"tokens_{reader.fingerprint()}.pt")
+
+    tokenizer = Tokenizer()
+    print(f"Loaded tokenizer with vocab size {tokenizer.get_vocab_size()}")
+
+    # Key the token cache on both the data fingerprint and the tokenizer vocab size,
+    # so changing special tokens invalidates the cache automatically.
+    cache_path = os.path.join(CACHE_DIR, f"tokens_{reader.fingerprint()}_v{tokenizer.vocab_size}.pt")
 
     # Skip the slow read + clean + tokenize steps entirely when the cache is warm.
     if os.path.exists(cache_path):
@@ -359,9 +365,6 @@ def main() -> None:
         if not corpus:
             print("No text data was found. Using a fallback sample corpus.")
             corpus = "This is a sample sentence for dataset loader testing. " * 40
-
-    tokenizer = Tokenizer.from_pretrained("gpt2")
-    print(f"Loaded GPT-2 tokenizer with vocab size {tokenizer.get_vocab_size()}")
 
     # Print an example of how raw text is tokenized by GPT-2 tokenizer.
     sample_text = "The quick brown fox jumps over the lazy dog."
@@ -398,7 +401,7 @@ def main() -> None:
     # Free the raw corpus string (only needed to build the token cache).
     del corpus
 
-    model = build_model(device)
+    model = build_model(device, vocab_size=tokenizer.vocab_size)
     # AdamW is the standard optimizer for transformer training.
     # It decouples weight decay from the gradient update step.
     optimizer = AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
@@ -417,7 +420,7 @@ def main() -> None:
     # Weights & Biases: log all hyperparameters + train/val loss + LR.
     wandb_run = None
     try:
-        wandb_run = wandb.init(entity=WANDB_ENTITY, project=WANDB_PROJECT, name=WANDB_NAME, config=build_wandb_config())
+        wandb_run = wandb.init(entity=WANDB_ENTITY, project=WANDB_PROJECT, name=WANDB_NAME, config=build_wandb_config(tokenizer.vocab_size))
         wandb_run.config["num_train_examples"] = len(train_dataset)
         wandb_run.config["num_test_examples"] = len(test_dataset)
         wandb_run.config["num_parameters"] = sum(p.numel() for p in model.parameters())
