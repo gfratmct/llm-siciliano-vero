@@ -1,6 +1,6 @@
 # llm-pelatone
 
-Un LLM trainato con dati italiani al 100% e RL (soon).
+Un LLM trainato con dati italiani al 100% (perché sono un patriota vero italiano vero) e RL in siciliano per atteggiamento e conversazione (soon).
 
 Questo progetto è pensato come un gioco per imparare a costruire un modello di linguaggio basato su dati italiani, con l'obiettivo finale di insegnargli anche il Siciliano stretto stretto e quindi proseguire con un addestramento RL.
 
@@ -84,3 +84,4 @@ Questo script carica il modello salvato, carica il tokenizer GPT-2 e genera test
 ## Nota
 
 Per ora il modello è un piccolo esperimento locale. Il focus è comprendere la pipeline di training, i dati e la generazione testuale con un LLM in italiano.
+E ovviamente questo è un progetto ironico.
