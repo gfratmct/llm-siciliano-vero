@@ -21,28 +21,37 @@ Questa fonte raccoglie testi in italiano che verranno utilizzati per costruire i
 
 ## Come usarlo
 
-### Preparare i dati
+### Installare dipendenze e dataset
 
-1. Metti i file di testo in `data/` con estensione `.utf8`.
-2. Assicurati che il contenuto sia italiano.
+Assicurati di avere installati [uv](https://docs.astral.sh/uv/) e gli strumenti di sistema `curl` e `gzip`. Dalla cartella principale del progetto, scarica e sincronizza le dipendenze scegliendo una sola variante di PyTorch:
 
-### Allenare il modello
-
-Prima di eseguire l'allenamento, sincronizza le dipendenze col tool `uv`.
-
-#### Installazione CPU-only
+#### CPU-only
 
 ```bash
 uv sync --extra cpu
 ```
 
-#### Installazione con PyTorch CUDA (se hai GPU e vuoi usare CUDA 12.8)
+#### CUDA 12.8
 
 ```bash
 uv sync --extra cu128
 ```
 
-> Gli extra `cpu` e `cu128` sono alternativi e non possono essere installati insieme. Se CUDA 12.8 non è compatibile con il tuo sistema, usa `uv sync --extra cpu`.
+Gli extra `cpu` e `cu128` sono alternativi e non vanno usati insieme. Se CUDA 12.8 non è compatibile con il sistema, usa la variante CPU.
+
+Scarica quindi il dataset ed estrai il corpus principale nella cartella `data/`:
+
+```bash
+bash scripts/init.sh
+```
+
+Lo script scarica gli archivi PAISA e decomprime `paisa.raw.utf8` direttamente in `data/`. Può essere eseguito dalla cartella principale del progetto o da un'altra directory.
+
+### Preparare manualmente i dati (opzionale)
+
+Se non usi lo script di inizializzazione, metti i file di testo in `data/` con estensione `.utf8` e assicurati che il contenuto sia italiano.
+
+### Allenare il modello
 
 Dopodiché avvia il training:
 
