@@ -7,10 +7,7 @@ from safetensors.torch import save_file
 from torch import nn
 from torch.optim import AdamW
 
-try:
-    import wandb
-except ImportError:
-    wandb = None
+import wandb
 
 from lib.dataset import DatasetReader, load_text_datasets, create_dataloaders
 from lib.models import LLM
@@ -48,7 +45,7 @@ QKV_BIAS = False
 BATCH_SIZE = 32
 # BLOCK_SIZE: sequence length of each training example in tokens.
 #   The model learns from blocks of this length at a time.
-BLOCK_SIZE = 128
+BLOCK_SIZE = 256
 # LEARNING_RATE: step size used by the optimizer to update weights.
 #   If too high, training can diverge; if too low, convergence is slow.
 LEARNING_RATE = 3e-4
@@ -89,11 +86,9 @@ CACHE_DIR = "cache"
 # SAVE_EVERY_EPOCHS: save a checkpoint every N epochs during training.
 SAVE_EVERY_EPOCHS = 1
 # WANDB_PROJECT: Weights & Biases project name for experiment tracking.
-WANDB_PROJECT = "llm-pelatone"
+WANDB_PROJECT = "llm-siciliano-vero"
 # WANDB_NAME: run name shown in the W&B dashboard (set None to auto-generate).
 WANDB_NAME = None
-# WANDB_ENABLED: set to False to disable W&B logging entirely.
-WANDB_ENABLED = True
 
 
 def build_wandb_config() -> dict:
@@ -396,17 +391,17 @@ def main() -> None:
 
     # Weights & Biases: log all hyperparameters + train/val loss + LR.
     wandb_run = None
-    if WANDB_ENABLED and wandb is not None:
-        try:
-            wandb_run = wandb.init(project=WANDB_PROJECT, name=WANDB_NAME, config=build_wandb_config())
-            wandb_run.config["num_train_examples"] = len(train_dataset)
-            wandb_run.config["num_test_examples"] = len(test_dataset)
-            wandb_run.config["num_parameters"] = sum(p.numel() for p in model.parameters())
-            wandb.watch(model, log="all", log_freq=100)
-            print("W&B logging enabled")
-        except Exception as exc:  # keep training running even without W&B auth/network
-            print(f"W&B init failed, continuing without logging: {exc}")
-            wandb_run = None
+    try:
+        wandb_settings = wandb.Settings(base_url="http://0.0.0.0:8000")
+        wandb_run = wandb.init(project=WANDB_PROJECT, name=WANDB_NAME, config=build_wandb_config(), settings=wandb_settings)
+        wandb_run.config["num_train_examples"] = len(train_dataset)
+        wandb_run.config["num_test_examples"] = len(test_dataset)
+        wandb_run.config["num_parameters"] = sum(p.numel() for p in model.parameters())
+        wandb.watch(model, log="all", log_freq=100)
+        print("W&B logging enabled")
+    except Exception as exc:  # keep training running even without W&B auth/network
+        print(f"W&B init failed, continuing without logging: {exc}")
+        wandb_run = None
 
     step_counter = [0]
 
