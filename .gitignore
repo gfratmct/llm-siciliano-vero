@@ -9,7 +9,7 @@ wheels/
 # Virtual environments
 .venv
 
-data/
 !data/init.sh
+data/
 
 *.pt
