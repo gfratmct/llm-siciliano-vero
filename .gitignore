@@ -9,7 +9,7 @@ wheels/
 # Virtual environments
 .venv
 
-!data/init.sh
+# Ignore all files in data/, but keep data/init.sh tracked.
 data/
 
 *.pt

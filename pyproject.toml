@@ -25,5 +25,12 @@ explicit = true
 
 [tool.uv.sources]
 # Try CUDA wheels first, then fall back to CPU builds if CUDA is unavailable.
-torch = [{ index = "pytorch-cuda" }, { index = "pytorch-cpu" }]
-torchvision = [{ index = "pytorch-cuda" }, { index = "pytorch-cpu" }]
+# Because multiple sources are listed, each source needs a platform marker.
+torch = [
+    { index = "pytorch-cuda", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
+]
+torchvision = [
+    { index = "pytorch-cuda", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
+]
