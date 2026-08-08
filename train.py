@@ -262,8 +262,7 @@ def main() -> None:
         corpus = None
         print(f"Token cache hit: {cache_path}")
     else:
-        sentences = reader.read()
-        corpus = " ".join(sentences)
+        corpus = reader.read()
 
         if not corpus:
             print("No text data was found. Using a fallback sample corpus.")
@@ -303,6 +302,9 @@ def main() -> None:
 
     print(f"Train examples: {len(train_dataset)}")
     print(f"Test examples: {len(test_dataset)}")
+
+    # Free the raw corpus string (only needed to build the token cache).
+    del corpus
 
     model = build_model(device)
     # AdamW is the standard optimizer for transformer training.

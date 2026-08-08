@@ -9,6 +9,26 @@ from torch.utils.data import DataLoader, Dataset, random_split
 
 from tokenizers import Tokenizer
 
+# Encode the corpus in chunks of this many characters so peak memory stays
+# bounded. Encoding the whole corpus at once materializes a Python list of
+# hundreds of millions of ints (tens of GB) and crashes machines with large
+# datasets. Chunking deviates only at chunk boundaries (a handful of tokens
+# across the whole corpus), which is the standard LLM sharding trade-off.
+_TOKENIZE_CHUNK_SIZE = 20_000_000
+
+
+def _encode_corpus(corpus: str, tokenizer: Tokenizer) -> torch.Tensor:
+    """Encode a large corpus in chunks, returning a flat int32 token tensor."""
+    chunk_tensors = []
+    total = 0
+    for start in range(0, len(corpus), _TOKENIZE_CHUNK_SIZE):
+        piece = corpus[start : start + _TOKENIZE_CHUNK_SIZE]
+        encoding = tokenizer.encode(piece)
+        chunk_tensors.append(torch.tensor(encoding.ids, dtype=torch.int32))
+        total += chunk_tensors[-1].numel()
+    print(f"Tokenized corpus: {total / 1e6:.0f}M tokens")
+    return torch.cat(chunk_tensors)
+
 
 class DatasetReader:
     whitelist_extensions = [".utf8"]
@@ -36,25 +56,24 @@ class DatasetReader:
             hasher.update(str(int(stat.st_mtime)).encode("utf-8"))
         return hasher.hexdigest()[:16]
 
-    def read(self) -> list[str]:
-        """Read raw files, clean their text, and return sentences."""
+    def read(self) -> str:
+        """Read raw files and return the cleaned corpus as a single string."""
         file_paths = self.get_paths()
-        corpus = []
+        parts = []
 
         for file_path in file_paths:
             with open(file_path, "r", encoding="utf-8") as f:
-                corpus.append(f.read())
+                parts.append(f.read())
 
-        print(f"Corpus length: {len(corpus)} files")
+        print(f"Corpus length: {len(parts)} files")
 
-        full_raw_text = "\n".join(corpus)
+        full_raw_text = "\n".join(parts)
 
         cleaned_text = re.sub(r"<[^>]+>", "", full_raw_text)
         cleaned_text = re.sub(r"\s+", " ", cleaned_text).strip()
         cleaned_text = re.sub(r"##.*?##", "", cleaned_text, flags=re.DOTALL)
 
-        split_sentences = re.split(r"(?<=[.\!?]) +", cleaned_text)
-        return [sentence for sentence in split_sentences if sentence]
+        return cleaned_text
 
 
 class TextDataset(Dataset):
@@ -74,9 +93,7 @@ class TextDataset(Dataset):
         if corpus is None:
             raise ValueError("No cached tokens found and no corpus provided.")
 
-        encoding = tokenizer.encode(corpus)
-        tokens = torch.tensor(encoding.ids, dtype=torch.int32)
-        print(f"Tokenized corpus: {tokens.numel() / 1e6:.0f}M tokens")
+        tokens = _encode_corpus(corpus, tokenizer)
 
         if cache_path is not None:
             os.makedirs(os.path.dirname(cache_path) or ".", exist_ok=True)
@@ -146,8 +163,7 @@ def create_dataloaders(
 
 if __name__ == "__main__":
     reader = DatasetReader("data/")
-    sentences = reader.read()
-    corpus = " ".join(sentences)[0:1000]
+    corpus = reader.read()[:1000]
 
     if not corpus:
         print("No data files found in data/. Using a small sample corpus for test execution.")
