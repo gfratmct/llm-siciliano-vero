@@ -23,21 +23,34 @@ Questa fonte raccoglie testi in italiano che verranno utilizzati per costruire i
 
 ### Installare dipendenze e dataset
 
-Assicurati di avere installati [uv](https://docs.astral.sh/uv/) e gli strumenti di sistema `curl` e `gzip`. Dalla cartella principale del progetto, scarica e sincronizza le dipendenze scegliendo una sola variante di PyTorch:
+Assicurati di avere installati Python e gli strumenti di sistema `curl` e `gzip`. Dalla cartella principale del progetto, crea e attiva un virtualenv:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Installa quindi PyTorch manualmente scegliendo una sola variante:
 
 #### CPU-only
 
 ```bash
-uv sync --extra cpu
+pip install torch torchvision
 ```
 
 #### CUDA 12.8
 
 ```bash
-uv sync --extra cu128
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 ```
 
-Gli extra `cpu` e `cu128` sono alternativi e non vanno usati insieme. Se CUDA 12.8 non è compatibile con il sistema, usa la variante CPU.
+Infine installa le restanti dipendenze:
+
+```bash
+pip install -r requirements.txt
+```
+
+Le due varianti di PyTorch sono alternative e non vanno usate insieme. Se CUDA 12.8 non è compatibile con il sistema, usa la variante CPU.
 
 Scarica quindi il dataset ed estrai il corpus principale nella cartella `data/`:
 
@@ -56,7 +69,7 @@ Se non usi lo script di inizializzazione, metti i file di testo in `data/` con e
 Dopodiché avvia il training:
 
 ```bash
-python3 train.py
+python train.py
 ```
 
 Questo script:
@@ -70,7 +83,7 @@ Questo script:
 ### Generare testo
 
 ```bash
-python3 app.py
+python app.py
 ```
 
 Questo script carica il modello salvato, carica il tokenizer GPT-2 e genera testo a partire da un prompt.
