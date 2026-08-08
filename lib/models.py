@@ -8,7 +8,6 @@ class PositionalEncoding(nn.Module):
     def __init__(self, embed_dim: int, max_seq_length: int = 512):
         super(PositionalEncoding, self).__init__()
 
-        print(embed_dim,)
         # empty pe tensor
         pe = torch.zeros(max_seq_length, embed_dim) # shape: [max_seq_length, embed_dim]
 
@@ -121,11 +120,18 @@ class LLM(nn.Module):
         ])
         self.fc_out = nn.Linear(embed_dim, vocab_size)
         self.dropout = nn.Dropout(dropout)
+        self.register_buffer(
+            "causal_mask",
+            torch.tril(torch.ones(max_seq_length, max_seq_length, dtype=torch.bool)),
+        )
 
-    def forward(self, x, mask = None):
+    def forward(self, x, mask=None):
         x = self.embedding(x)
         x = self.positional_encoding(x)
         x = self.dropout(x)
+
+        if mask is None:
+            mask = self.causal_mask[: x.size(1), : x.size(1)]
 
         for block in self.transformer_blocks:
             x = block(x, mask)

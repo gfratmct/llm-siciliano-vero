@@ -1,3 +1,4 @@
+import math
 import os
 import time
 
@@ -13,7 +14,8 @@ from tokenizers import Tokenizer
 # Model hyperparameters
 # MAX_SEQUENCE_LENGTH: maximum input length the model can handle in one forward pass.
 #   If your corpus contains longer sequences, they will be truncated or split.
-MAX_SEQUENCE_LENGTH = 2048
+#   This is the positional-encoding ceiling and must be >= BLOCK_SIZE.
+MAX_SEQUENCE_LENGTH = 4096
 # VOCAB_SIZE: GPT-2 tokenizer vocabulary size used by the model embedding layer.
 #   The embedding matrix must match the tokenizer vocabulary.
 VOCAB_SIZE = 50257
@@ -22,10 +24,11 @@ VOCAB_SIZE = 50257
 EMBEDDING_DIM = 1024
 # NUM_HEADS: number of attention heads in multi-head self-attention.
 #   More heads let the model learn multiple attention patterns in parallel.
-NUM_HEADS = 26
+#   Must divide EMBEDDING_DIM evenly (1024 / 16 = 64).
+NUM_HEADS = 16
 # NUM_LAYERS: number of transformer blocks in the model.
 #   More layers generally improve capacity at the cost of training time.
-NUM_LAYERS = 48
+NUM_LAYERS = 24
 # DROP_RATE: dropout probability for regularization.
 #   Dropout helps reduce overfitting by randomly dropping network activations.
 DROP_RATE = 0.1
@@ -36,19 +39,20 @@ QKV_BIAS = False
 # Training hyperparameters
 # BATCH_SIZE: number of examples processed before each optimizer update.
 #   Larger batches use memory faster but give smoother gradient estimates.
-BATCH_SIZE = 8
+#   32 x 128 tokens/step = 4096 tokens per update.
+BATCH_SIZE = 32
 # BLOCK_SIZE: sequence length of each training example in tokens.
 #   The model learns from blocks of this length at a time.
-BLOCK_SIZE = 32
+BLOCK_SIZE = 128
 # LEARNING_RATE: step size used by the optimizer to update weights.
 #   If too high, training can diverge; if too low, convergence is slow.
-LEARNING_RATE = 5e-5
+LEARNING_RATE = 3e-4
 # WEIGHT_DECAY: L2 regularization strength to prevent overfitting.
 #   Small weight decay helps keep model weights from growing too large.
 WEIGHT_DECAY = 0.01
 # NUM_EPOCHS: number of full passes over the training data.
-#   More epochs allow the model to fit the data better, up to a point.
-NUM_EPOCHS = 1000
+#   The corpus yields ~58k steps/epoch, so even 2 epochs is ~116k optimizer steps.
+NUM_EPOCHS = 2
 # TEST_RATIO: fraction of the dataset held out for validation.
 #   Validation loss measures generalization and prevents overfitting.
 TEST_RATIO = 0.1
@@ -73,12 +77,12 @@ TOP_K = 50
 # SEED: random seed for reproducibility across runs.
 SEED = 42
 # CHECKPOINT_DIR: directory where model checkpoints are saved.
-CHECKPOINT_DIR = "runs"
+CHECKPOINT_DIR = "/workspace/runs"
 # CACHE_DIR: directory where the pre-tokenized corpus is cached to disk.
 #   Tokenizing the full corpus takes minutes, so a cache makes reruns instant.
 CACHE_DIR = "cache"
 # SAVE_EVERY_EPOCHS: save a checkpoint every N epochs during training.
-SAVE_EVERY_EPOCHS = 10
+SAVE_EVERY_EPOCHS = 1
 
 
 def set_seed(seed: int = 42):
@@ -104,6 +108,16 @@ def get_amp_config(device: torch.device) -> tuple[torch.dtype, torch.amp.GradSca
     return torch.float32, None
 
 
+def make_lr_lambda(warmup_steps: int, total_steps: int):
+    """Linear warmup, then cosine decay to 5% of the peak learning rate."""
+    def lr_lambda(step: int) -> float:
+        if step < warmup_steps:
+            return (step + 1) / max(1, warmup_steps)
+        progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
+        return 0.5 * (1 + math.cos(math.pi * min(progress, 1.0))) + 0.05
+    return lr_lambda
+
+
 def train_epoch(
     model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
@@ -114,6 +128,7 @@ def train_epoch(
     tokenizer: Tokenizer,
     amp_dtype: torch.dtype,
     scaler: torch.amp.GradScaler | None,
+    scheduler: torch.optim.lr_scheduler.LambdaLR | None = None,
 ) -> float:
     """Train the model for one epoch and return the average loss."""
     model.train()
@@ -145,6 +160,9 @@ def train_epoch(
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
             optimizer.step()
+
+        if scheduler is not None:
+            scheduler.step()
 
         total_loss += loss.item()
         num_batches += 1
@@ -310,6 +328,10 @@ def main() -> None:
     # AdamW is the standard optimizer for transformer training.
     # It decouples weight decay from the gradient update step.
     optimizer = AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    # Warmup + cosine decay: 1% linear warmup, then cosine down to 5% of peak LR.
+    total_steps = len(train_loader) * NUM_EPOCHS
+    warmup_steps = max(1, int(0.01 * total_steps))
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, make_lr_lambda(warmup_steps, total_steps))
     # CrossEntropyLoss combines LogSoftmax + NLLLoss in one function.
     # This is the standard loss for next-token prediction.
     criterion = nn.CrossEntropyLoss()
@@ -319,7 +341,7 @@ def main() -> None:
 
     for epoch in range(1, NUM_EPOCHS + 1):
         start_time = time.time()
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, epoch, tokenizer, amp_dtype, scaler)
+        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, epoch, tokenizer, amp_dtype, scaler, scheduler)
         val_loss = evaluate_model(model, test_loader, criterion, device, amp_dtype)
         epoch_time = time.time() - start_time
 
