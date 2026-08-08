@@ -13,6 +13,27 @@ from lib.dataset import DatasetReader, load_text_datasets, create_dataloaders
 from lib.models import LLM
 from tokenizers import Tokenizer
 
+
+def safe_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
+    """Return a state-dict with shared tensors cloned so safetensors can save it.
+
+    We tie ``embedding.weight`` to ``fc_out.weight`` for stability, but
+    ``safetensors.save_file`` refuses to serialize tensors that share memory.
+    This helper clones only the duplicates.
+    """
+    state_dict = model.state_dict()
+    seen_ptrs: set[int] = set()
+    result: dict[str, torch.Tensor] = {}
+    for key, tensor in state_dict.items():
+        ptr = tensor.data_ptr()
+        if ptr in seen_ptrs:
+            result[key] = tensor.clone()
+        else:
+            seen_ptrs.add(ptr)
+            result[key] = tensor
+    return result
+
+
 # Model hyperparameters
 # MAX_SEQUENCE_LENGTH: maximum input length the model can handle in one forward pass.
 #   If your corpus contains longer sequences, they will be truncated or split.
@@ -429,21 +450,21 @@ def main() -> None:
         # Save periodic checkpoints to track progress across training.
         if epoch % SAVE_EVERY_EPOCHS == 0:
             checkpoint_path = os.path.join(CHECKPOINT_DIR, f"checkpoint_epoch_{epoch}.safetensors")
-            save_file(model.state_dict(), checkpoint_path)
+            save_file(safe_state_dict(model), checkpoint_path)
             print(f"Saved periodic checkpoint: {checkpoint_path}")
 
         # Save the best model by validation loss.
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_path = os.path.join(CHECKPOINT_DIR, "best_model.safetensors")
-            save_file(model.state_dict(), best_path)
+            save_file(safe_state_dict(model), best_path)
             print(f"Saved best validation checkpoint: {best_path}")
             if wandb_run is not None:
                 wandb_run.log({"val/best_loss": best_val_loss, "epoch": epoch})
 
     # Save final checkpoint after all epochs are complete.
     final_path = os.path.join(CHECKPOINT_DIR, "final_model.safetensors")
-    save_file(model.state_dict(), final_path)
+    save_file(safe_state_dict(model), final_path)
     print(f"Saved final model checkpoint: {final_path}")
 
     prompt = "Ciao come stai"
