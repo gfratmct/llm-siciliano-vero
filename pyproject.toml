@@ -9,8 +9,24 @@ dependencies = [
     "pandas>=3.0.5",
     "safetensors>=0.8.0",
     "tokenizers>=0.23.1",
+]
+
+[project.optional-dependencies]
+cpu = [
     "torch>=2.11.0",
     "torchvision>=0.26.0",
+]
+cu128 = [
+    "torch>=2.11.0",
+    "torchvision>=0.26.0",
+]
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "cpu" },
+        { extra = "cu128" },
+    ],
 ]
 
 [[tool.uv.index]]
@@ -19,18 +35,16 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [[tool.uv.index]]
-name = "pytorch-cuda"
+name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [tool.uv.sources]
-# Try CUDA wheels first, then fall back to CPU builds if CUDA is unavailable.
-# Because multiple sources are listed, each source needs a platform marker.
 torch = [
-    { index = "pytorch-cuda", marker = "sys_platform == 'linux'" },
-    { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu128", extra = "cu128" },
 ]
 torchvision = [
-    { index = "pytorch-cuda", marker = "sys_platform == 'linux'" },
-    { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu128", extra = "cu128" },
 ]

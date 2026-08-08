@@ -33,16 +33,16 @@ Prima di eseguire l'allenamento, sincronizza le dipendenze col tool `uv`.
 #### Installazione CPU-only
 
 ```bash
-uv sync
+uv sync --extra cpu
 ```
 
-#### Installazione con PyTorch CUDA (se hai GPU e vuoi usare CUDA 11.8)
+#### Installazione con PyTorch CUDA (se hai GPU e vuoi usare CUDA 12.8)
 
 ```bash
-uv sync --index pytorch-cuda
+uv sync --extra cu128
 ```
 
-> Se `uv sync --index pytorch-cuda` non è disponibile o non è compatibile con il tuo sistema, usa `uv sync` per installare la versione CPU.
+> Gli extra `cpu` e `cu128` sono alternativi e non possono essere installati insieme. Se CUDA 12.8 non è compatibile con il tuo sistema, usa `uv sync --extra cpu`.
 
 Dopodiché avvia il training:
 
