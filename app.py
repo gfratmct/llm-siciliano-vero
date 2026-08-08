@@ -6,19 +6,19 @@ from safetensors.torch import load_file
 from tokenizers import Tokenizer
 
 # Model hyperparameters
-MAX_SEQUENCE_LENGTH = 1024
+MAX_SEQUENCE_LENGTH = 4096
 VOCAB_SIZE = 50257
-EMBEDDING_DIM = 768
-NUM_HEADS = 12
-NUM_LAYERS = 12
+EMBEDDING_DIM = 1024
+NUM_HEADS = 16
+NUM_LAYERS = 24
 DROP_RATE = 0.1
 QKV_BIAS = False
 
 # Inference hyperparameters
 GENERATE_MAX_TOKENS = 64
-TEMPERATURE = 1.0
+TEMPERATURE = 0.5
 TOP_K = 50
-MODEL_CHECKPOINT = "runs/best_model.safetensors"
+MODEL_CHECKPOINT = "models/checkpoint_epoch_4.safetensors"
 
 
 def get_device() -> torch.device:
@@ -99,7 +99,7 @@ def main() -> None:
     model = build_model(device)
     load_checkpoint(model, MODEL_CHECKPOINT)
 
-    prompt = "The science of machine learning"
+    prompt = "Nella vita mia, io non ho"
     print("Prompt:", prompt)
 
     generated_text = generate_text(model, tokenizer, prompt, max_new_tokens=GENERATE_MAX_TOKENS, temperature=TEMPERATURE, top_k=TOP_K, device=device)

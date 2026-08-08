@@ -19,3 +19,5 @@ runs/
 *.pt
 
 .DS_Store
+
+models/

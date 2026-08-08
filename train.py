@@ -7,6 +7,11 @@ from safetensors.torch import save_file
 from torch import nn
 from torch.optim import AdamW
 
+try:
+    import wandb
+except ImportError:
+    wandb = None
+
 from lib.dataset import DatasetReader, load_text_datasets, create_dataloaders
 from lib.models import LLM
 from tokenizers import Tokenizer
@@ -83,6 +88,46 @@ CHECKPOINT_DIR = "/workspace/runs"
 CACHE_DIR = "cache"
 # SAVE_EVERY_EPOCHS: save a checkpoint every N epochs during training.
 SAVE_EVERY_EPOCHS = 1
+# WANDB_PROJECT: Weights & Biases project name for experiment tracking.
+WANDB_PROJECT = "llm-pelatone"
+# WANDB_NAME: run name shown in the W&B dashboard (set None to auto-generate).
+WANDB_NAME = None
+# WANDB_ENABLED: set to False to disable W&B logging entirely.
+WANDB_ENABLED = True
+
+
+def build_wandb_config() -> dict:
+    """Collect every hyperparameter into a nested config for W&B."""
+    return {
+        "model": {
+            "max_sequence_length": MAX_SEQUENCE_LENGTH,
+            "vocab_size": VOCAB_SIZE,
+            "embedding_dim": EMBEDDING_DIM,
+            "num_heads": NUM_HEADS,
+            "num_layers": NUM_LAYERS,
+            "drop_rate": DROP_RATE,
+            "qkv_bias": QKV_BIAS,
+        },
+        "training": {
+            "batch_size": BATCH_SIZE,
+            "block_size": BLOCK_SIZE,
+            "learning_rate": LEARNING_RATE,
+            "weight_decay": WEIGHT_DECAY,
+            "num_epochs": NUM_EPOCHS,
+            "test_ratio": TEST_RATIO,
+            "grad_clip_norm": GRAD_CLIP_NORM,
+            "num_workers": NUM_WORKERS,
+            "seed": SEED,
+        },
+        "inference": {
+            "generate_max_tokens": GENERATE_MAX_TOKENS,
+            "temperature": TEMPERATURE,
+            "top_k": TOP_K,
+        },
+        "logging": {
+            "save_every_epochs": SAVE_EVERY_EPOCHS,
+        },
+    }
 
 
 def set_seed(seed: int = 42):
@@ -129,6 +174,8 @@ def train_epoch(
     amp_dtype: torch.dtype,
     scaler: torch.amp.GradScaler | None,
     scheduler: torch.optim.lr_scheduler.LambdaLR | None = None,
+    wandb_run=None,
+    step_counter: list[int] | None = None,
 ) -> float:
     """Train the model for one epoch and return the average loss."""
     model.train()
@@ -166,6 +213,8 @@ def train_epoch(
 
         total_loss += loss.item()
         num_batches += 1
+        if step_counter is not None:
+            step_counter[0] += 1
 
         # Print detailed debug information for the first batch of each epoch.
         if batch_idx == 0:
@@ -182,6 +231,12 @@ def train_epoch(
 
         if (batch_idx + 1) % 20 == 0:
             print(f"Epoch {epoch} | Batch {batch_idx + 1}/{len(dataloader)} | Loss {loss.item():.4f}")
+            if wandb_run is not None:
+                wandb_run.log({
+                    "train/batch_loss": loss.item(),
+                    "train/lr": optimizer.param_groups[0]["lr"],
+                    "step": step_counter[0] if step_counter is not None else batch_idx,
+                })
 
     return total_loss / max(1, num_batches)
 
@@ -339,13 +394,39 @@ def main() -> None:
     best_val_loss = float("inf")
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
+    # Weights & Biases: log all hyperparameters + train/val loss + LR.
+    wandb_run = None
+    if WANDB_ENABLED and wandb is not None:
+        try:
+            wandb_run = wandb.init(project=WANDB_PROJECT, name=WANDB_NAME, config=build_wandb_config())
+            wandb_run.config["num_train_examples"] = len(train_dataset)
+            wandb_run.config["num_test_examples"] = len(test_dataset)
+            wandb_run.config["num_parameters"] = sum(p.numel() for p in model.parameters())
+            wandb.watch(model, log="all", log_freq=100)
+            print("W&B logging enabled")
+        except Exception as exc:  # keep training running even without W&B auth/network
+            print(f"W&B init failed, continuing without logging: {exc}")
+            wandb_run = None
+
+    step_counter = [0]
+
     for epoch in range(1, NUM_EPOCHS + 1):
         start_time = time.time()
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, epoch, tokenizer, amp_dtype, scaler, scheduler)
+        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, epoch, tokenizer, amp_dtype, scaler, scheduler, wandb_run, step_counter)
         val_loss = evaluate_model(model, test_loader, criterion, device, amp_dtype)
         epoch_time = time.time() - start_time
+        lr_now = scheduler.get_last_lr()[0] if scheduler is not None else LEARNING_RATE
 
         print(f"Epoch {epoch}/{NUM_EPOCHS} | train_loss={train_loss:.4f} | val_loss={val_loss:.4f} | time={epoch_time:.1f}s")
+
+        if wandb_run is not None:
+            wandb_run.log({
+                "train/loss": train_loss,
+                "val/loss": val_loss,
+                "train/lr": lr_now,
+                "epoch": epoch,
+                "epoch_time_s": epoch_time,
+            })
 
         # Save periodic checkpoints to track progress across training.
         if epoch % SAVE_EVERY_EPOCHS == 0:
@@ -359,6 +440,8 @@ def main() -> None:
             best_path = os.path.join(CHECKPOINT_DIR, "best_model.safetensors")
             save_file(model.state_dict(), best_path)
             print(f"Saved best validation checkpoint: {best_path}")
+            if wandb_run is not None:
+                wandb_run.log({"val/best_loss": best_val_loss, "epoch": epoch})
 
     # Save final checkpoint after all epochs are complete.
     final_path = os.path.join(CHECKPOINT_DIR, "final_model.safetensors")
@@ -369,6 +452,10 @@ def main() -> None:
     generated_text = generate_text(model, tokenizer, prompt, max_new_tokens=GENERATE_MAX_TOKENS, device=device)
     print(f"Prompt: {prompt}")
     print(generated_text)
+
+    if wandb_run is not None:
+        wandb_run.log({"val/final_loss": val_loss, "generated_text": generated_text})
+        wandb_run.finish()
 
 
 if __name__ == "__main__":
