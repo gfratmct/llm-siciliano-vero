@@ -1,8 +1,8 @@
 # llm-pelatone
 
-Un LLM trainato con dati italiani al 100% (perché sono un patriota vero italiano vero) e RL in siciliano per atteggiamento e conversazione (soon).
+Un LLM trainato con dati italiani al 100% (perché sono un patriota vero italiano vero) e che — un passo alla volta — imparerà a parlare il Siciliano stretto stretto.
 
-Questo progetto è pensato come un gioco per imparare a costruire un modello di linguaggio basato su dati italiani, con l'obiettivo finale di insegnargli anche il Siciliano stretto stretto e quindi proseguire con un addestramento RL.
+Quando dico "RL" in realtà intendo un percorso a tappe, fatto soprattutto di addestramento supervisionato: prima l'italiano, poi la conversazione, poi il siciliano, e infine un allineamento in cui un LLM più bravo di lui gli fa da insegnante. Nessuna magia, solo tanta fatica e tanti dati (vedi [Il percorso](#il-percorso)).
 
 ## Dataset
 
@@ -176,14 +176,25 @@ python app.py \
     --repetition-penalty 1.2
 ```
 
-## Piano futuro
+## Il percorso
 
-- addestrare e confrontare la variante MoE (`--arch moe`) rispetto alla densa
-- continuare l'addestramento RL (Reinforcement Learning) per migliorare la coerenza e lo stile
-- aggiungere il Siciliano e insegnare al modello a parlare Siciliano stretto
-- trasformare il progetto in un vero gioco didattico per imparare LLM e linguistica italiana
+L'obiettivo non è fare tutto in una botta sola: è far crescere il modello un pezzetto alla volta. Questa è la strada (e quando parlo di "RL" intendo questa):
+
+1. **Pre-training** *(in corso)* — il modello legge tantissimo italiano grezzo e impara la lingua: le parole, la grammatica, un po' di mondo. È il fondamento di tutto.
+2. **SFT conversazionale** — dopo il pre-training, gli insegniamo a fare conversazione: gli mostriamo migliaia di dialoghi (chi parla, chi ascolta, come si risponde) finché non impara a tenere botta da solo.
+3. **SFT in siciliano** — stessa cosa del punto 2, ma con conversazioni in siciliano. È qui che comincia a farsi l'orecchio (e la bocca) siciliana.
+4. **Allineamento con un LLM insegnante** — l'ultimo passo, il più delicato: un LLM più esperto gli fa da maestro e gli insegna a essere un *vero* siciliano. Non solo la lingua, ma l'atteggiamento, il tono, i modi di dire. Questo allineamento può usare tecniche supervisionate (SFT/DPO) dove l'insegnante gli fa da guida e da giudice.
+
+A ogni tappa confrontiamo il modello con quello della tappa precedente: se non migliora, torniamo sui dati e ricominciamo. Il bello è che il percorso lo facciamo imparando per strada.
+
+### Cose in programma (senza fretta)
+
+- confrontare la variante MoE (`--arch moe`) con quella densa e scegliere la migliore
+- preparare il dataset conversazionale italiano per la SFT
+- raccogliere conversazioni siciliane (o tradurle con attenzione)
+- impostare il primo allineamento con un LLM insegnante
 
 ## Nota
 
-Per ora il modello è un piccolo esperimento locale. Il focus è comprendere la pipeline di training, i dati e la generazione testuale con un LLM in italiano.
-E ovviamente questo è un progetto ironico.
+Per ora il modello è un piccolo esperimento locale: stiamo imparando a costruire e addestrare un LLM in italiano, senza fretta e senza pretese. Il focus è capire la pipeline di training, i dati e la generazione testuale, prima di buttarci sulla conversazione e sul siciliano.
+E ovviamente questo è un progetto ironico: ma il percorso per farlo parlare siciliano è serio.
