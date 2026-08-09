@@ -1,8 +1,6 @@
-# llm-pelatone
+# llm-siciliano-vero
 
-Un LLM trainato con dati italiani al 100% (perché sono un patriota vero italiano vero) e che — un passo alla volta — imparerà a parlare il Siciliano stretto stretto.
-
-Quando dico "RL" in realtà intendo un percorso a tappe, fatto soprattutto di addestramento supervisionato: prima l'italiano, poi la conversazione, poi il siciliano, e infine un allineamento in cui un LLM più bravo di lui gli fa da insegnante. Nessuna magia, solo tanta fatica e tanti dati (vedi [Il percorso](#il-percorso)).
+Un LLM trainato con dati italiani al 100% (perché sono un patriota vero, un italiano vero) per poi farlo diventare un siciliano vero, visto che finalmente ho potuto acquistare una bella RTX PRO 6000. BTW - vedi [Il percorso](#il-percorso) per un po' di contesto sul progetto.
 
 ## Dataset
 
@@ -17,23 +15,6 @@ Come riferimento per ampliare il corpus con più dati grezzi in italiano:
 - https://dumps.wikimedia.org/itwiki/ (dump completo di Wikipedia in italiano)
 
 Lo snapshot di Wikipedia italiana è uno dei corpus in lingua italiana più grandi e variegati disponibili gratuitamente. Puoi scaricare il dump `pages-articles` e processarlo con tool come `wikiextractor` per estrarre il testo pulito da aggiungere alla cartella `data/`.
-
-## Cosa fa questo progetto
-
-- `lib/config.py`: contiene le dataclass tipizzate `ModelConfig`, `TrainingConfig` e `GenerationConfig`. Ogni configurazione si costruisce da un dict (`from_dict`) e si serializza (`to_dict`), ed è l'unica fonte di verità per `config.json`. `ModelConfig` supporta due architetture: `dense` e `moe`.
-- `lib/models/`: package con le architetture di modello, suddiviso in file separati:
-  - `components.py`: blocchi riutilizzabili (`LayerNorm`, `PositionalEncoding`, `MultiHeadAttention`, `FeedForward`).
-  - `base.py`: `BaseLLM`, il tronco condiviso (embedding, encoding posizionale, causal mask, output projection tied, forward).
-  - `dense.py`: `DenseLLM`, il Transformer autoregressivo "denso" (FFN completa in ogni blocco).
-  - `moe.py`: `MoELLM`, la variante Mixture-of-Experts: la FFN di ogni blocco è sostituita da un router top-k su `num_experts` esperti paralleli, con loss ausiliaria di load-balancing.
-  - `factory.py`: `build_model(config)` costruisce l'architettura giusta da una `ModelConfig`, più `resize_token_embeddings` e `load_model_from_checkpoint`.
-- `lib/training.py`: loop di training/valutazione (`train_epoch`, `evaluate_model`, `compute_loss`) e generazione (`generate_text`). Aggiunge automaticamente la loss ausiliaria MoE quando il modello ne espone una.
-- `lib/utils.py`: utilità generiche condivise (`get_device`, `set_seed`, `get_amp_config`, `make_lr_lambda`, `safe_state_dict`) definite una sola volta e importate ovunque servono.
-- `lib/tokenizer.py`: wrapper attorno al tokenizer (BPE byte-level) con i token speciali per la chat (`<|system|>`, `<|user|>`, `<|assistant|>`, `<|end|>`, `<pad>`, `<unk>`). Carica automaticamente un tokenizer generato su misura se esiste `models/tokenizer.json`, altrimenti usa GPT-2 come fallback.
-- `lib/dataset.py`: legge i file di testo dalla cartella `data/`, pulisce il testo e costruisce dataset a blocchi di token. Tutta la fase di lettura, pulizia e tokenizzazione mostra barre di avanzamento (`tqdm`).
-- `train_tokenizer.py`: addestra un tokenizer BPE sul corpus italiano e lo salva in `models/tokenizer.json`.
-- `train_transformer.py`: contiene il flusso di training, con spiegazioni passo passo e debug per mostrare come il modello predice il token successivo.
-- `app.py`: flusso di sola generazione, usa un checkpoint salvato per produrre testo a partire da un prompt.
 
 ## Come usarlo
 
@@ -178,16 +159,16 @@ python app.py \
 
 ## Il percorso
 
-L'obiettivo non è fare tutto in una botta sola: è far crescere il modello un pezzetto alla volta. Questa è la strada (e quando parlo di "RL" intendo questa):
+L'obiettivo non è fare tutto in una botta sola: è far crescere il modello un pezzetto alla volta. 
 
 1. **Pre-training** *(in corso)* — il modello legge tantissimo italiano grezzo e impara la lingua: le parole, la grammatica, un po' di mondo. È il fondamento di tutto.
 2. **SFT conversazionale** — dopo il pre-training, gli insegniamo a fare conversazione: gli mostriamo migliaia di dialoghi (chi parla, chi ascolta, come si risponde) finché non impara a tenere botta da solo.
 3. **SFT in siciliano** — stessa cosa del punto 2, ma con conversazioni in siciliano. È qui che comincia a farsi l'orecchio (e la bocca) siciliana.
 4. **Allineamento con un LLM insegnante** — l'ultimo passo, il più delicato: un LLM più esperto gli fa da maestro e gli insegna a essere un *vero* siciliano. Non solo la lingua, ma l'atteggiamento, il tono, i modi di dire. Questo allineamento può usare tecniche supervisionate (SFT/DPO) dove l'insegnante gli fa da guida e da giudice.
 
-A ogni tappa confrontiamo il modello con quello della tappa precedente: se non migliora, torniamo sui dati e ricominciamo. Il bello è che il percorso lo facciamo imparando per strada.
+A ogni tappa confrontiamo il modello con quello della tappa precedente: se non migliora, torniamo sui dati e ricominciamo.
 
-### Cose in programma (senza fretta)
+### Cose in programma
 
 - confrontare la variante MoE (`--arch moe`) con quella densa e scegliere la migliore
 - preparare il dataset conversazionale italiano per la SFT
