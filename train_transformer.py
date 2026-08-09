@@ -1,3 +1,5 @@
+import argparse
+import json
 import math
 import os
 import time
@@ -32,6 +34,35 @@ def safe_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
             seen_ptrs.add(ptr)
             result[key] = tensor
     return result
+
+
+def build_model_config(vocab_size: int) -> dict:
+    """Return the model architecture config needed to rebuild the model.
+
+    Inference settings (generation hyperparameters) are intentionally not
+    included here — they are controlled only via CLI arguments at inference
+    time, with the module-level constants as defaults.
+    """
+    return {
+        "max_sequence_length": MAX_SEQUENCE_LENGTH,
+        "vocab_size": vocab_size,
+        "embedding_dim": EMBEDDING_DIM,
+        "hidden_size": EMBEDDING_DIM * 4,
+        "num_heads": NUM_HEADS,
+        "num_layers": NUM_LAYERS,
+        "drop_rate": DROP_RATE,
+        "qkv_bias": QKV_BIAS,
+    }
+
+
+def save_model_config(vocab_size: int, checkpoint_dir: str) -> str:
+    """Save config.json into the checkpoint directory and return its path."""
+    config = build_model_config(vocab_size)
+    path = os.path.join(checkpoint_dir, "config.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+    print(f"Saved model config: {path}")
+    return path
 
 
 # Model hyperparameters
@@ -76,8 +107,7 @@ LEARNING_RATE = 1e-4
 #   Small weight decay helps keep model weights from growing too large.
 WEIGHT_DECAY = 0.01
 # NUM_EPOCHS: number of full passes over the training data.
-#   The corpus yields ~58k steps/epoch, so even 2 epochs is ~116k optimizer steps.
-NUM_EPOCHS = 2
+NUM_EPOCHS = 8
 # TEST_RATIO: fraction of the dataset held out for validation.
 #   Validation loss measures generalization and prevents overfitting.
 TEST_RATIO = 0.1
@@ -101,8 +131,9 @@ TEMPERATURE = 1.0
 TOP_K = 50
 # SEED: random seed for reproducibility across runs.
 SEED = 42
-# CHECKPOINT_DIR: directory where model checkpoints are saved.
-CHECKPOINT_DIR = "/workspace/runs"
+# CHECKPOINT_DIR: directory where model checkpoints and config.json are saved.
+#   All training outputs (checkpoints + config.json) live under ./models.
+CHECKPOINT_DIR = "models"
 # CACHE_DIR: directory where the pre-tokenized corpus is cached to disk.
 #   Tokenizing the full corpus takes minutes, so a cache makes reruns instant.
 CACHE_DIR = "cache"
@@ -114,6 +145,8 @@ WANDB_PROJECT = "llm-siciliano-vero"
 WANDB_NAME = None
 # WANDB_ENTITY
 WANDB_ENTITY = "gfratmct-personal"
+
+DATA_DIR = "data/"
 
 def build_wandb_config(vocab_size: int) -> dict:
     """Collect every hyperparameter into a nested config for W&B."""
@@ -338,8 +371,62 @@ def build_model(device: torch.device, vocab_size: int = VOCAB_SIZE) -> nn.Module
     return model.to(device)
 
 
+def parse_args() -> argparse.Namespace:
+    """Parse CLI hyperparameters, defaulting to the module-level constants."""
+    parser = argparse.ArgumentParser(description="Train the Italian transformer language model.")
+
+    # Model
+    g = parser.add_argument_group("model")
+    g.add_argument("--max-sequence-length", type=int, default=MAX_SEQUENCE_LENGTH, dest="MAX_SEQUENCE_LENGTH")
+    g.add_argument("--embedding-dim", type=int, default=EMBEDDING_DIM, dest="EMBEDDING_DIM")
+    g.add_argument("--num-heads", type=int, default=NUM_HEADS, dest="NUM_HEADS")
+    g.add_argument("--num-layers", type=int, default=NUM_LAYERS, dest="NUM_LAYERS")
+    g.add_argument("--drop-rate", type=float, default=DROP_RATE, dest="DROP_RATE")
+    g.add_argument("--qkv-bias", action=argparse.BooleanOptionalAction, default=QKV_BIAS, dest="QKV_BIAS")
+
+    # Training
+    g = parser.add_argument_group("training")
+    g.add_argument("--batch-size", type=int, default=BATCH_SIZE, dest="BATCH_SIZE")
+    g.add_argument("--block-size", type=int, default=BLOCK_SIZE, dest="BLOCK_SIZE")
+    g.add_argument("--learning-rate", type=float, default=LEARNING_RATE, dest="LEARNING_RATE")
+    g.add_argument("--weight-decay", type=float, default=WEIGHT_DECAY, dest="WEIGHT_DECAY")
+    g.add_argument("--num-epochs", type=int, default=NUM_EPOCHS, dest="NUM_EPOCHS")
+    g.add_argument("--test-ratio", type=float, default=TEST_RATIO, dest="TEST_RATIO")
+    g.add_argument("--grad-clip-norm", type=float, default=GRAD_CLIP_NORM, dest="GRAD_CLIP_NORM")
+    g.add_argument("--num-workers", type=int, default=NUM_WORKERS, dest="NUM_WORKERS")
+    g.add_argument("--pin-memory", action=argparse.BooleanOptionalAction, default=PIN_MEMORY, dest="PIN_MEMORY")
+    g.add_argument("--seed", type=int, default=SEED, dest="SEED")
+
+    # Inference (used for the end-of-training sample generation)
+    g = parser.add_argument_group("inference")
+    g.add_argument("--generate-max-tokens", type=int, default=GENERATE_MAX_TOKENS, dest="GENERATE_MAX_TOKENS")
+    g.add_argument("--temperature", type=float, default=TEMPERATURE, dest="TEMPERATURE")
+    g.add_argument("--top-k", type=int, default=TOP_K, dest="TOP_K")
+
+    # Paths & logging
+    g = parser.add_argument_group("paths & logging")
+    g.add_argument("--data-dir", type=str, default=DATA_DIR, dest="DATA_DIR")
+    g.add_argument("--checkpoint-dir", type=str, default=CHECKPOINT_DIR, dest="CHECKPOINT_DIR")
+    g.add_argument("--cache-dir", type=str, default=CACHE_DIR, dest="CACHE_DIR")
+    g.add_argument("--save-every-epochs", type=int, default=SAVE_EVERY_EPOCHS, dest="SAVE_EVERY_EPOCHS")
+
+    # W&B
+    g = parser.add_argument_group("weights & biases")
+    g.add_argument("--wandb-project", type=str, default=WANDB_PROJECT, dest="WANDB_PROJECT")
+    g.add_argument("--wandb-name", type=str, default=WANDB_NAME, dest="WANDB_NAME")
+    g.add_argument("--wandb-entity", type=str, default=WANDB_ENTITY, dest="WANDB_ENTITY")
+
+    return parser.parse_args()
+
+
 def main() -> None:
     """Full training entrypoint with dataset preparation, training, validation, and inference."""
+    args = parse_args()
+    # Override the module-level constants so every helper that reads them
+    # (build_wandb_config, train_epoch's grad clip, generate_text, etc.) picks
+    # up the values supplied on the command line.
+    globals().update(vars(args))
+
     set_seed(SEED)
     device = get_device()
     print(f"Using device: {device}")
@@ -347,7 +434,7 @@ def main() -> None:
     amp_dtype, scaler = get_amp_config(device)
     print(f"Mixed precision: {'enabled (' + str(amp_dtype) + ')' if amp_dtype != torch.float32 else 'off'}")
 
-    reader = DatasetReader("data/")
+    reader = DatasetReader(DATA_DIR)
 
     tokenizer = Tokenizer()
     print(f"Loaded tokenizer with vocab size {tokenizer.get_vocab_size()}")
@@ -403,6 +490,12 @@ def main() -> None:
     del corpus
 
     model = build_model(device, vocab_size=tokenizer.vocab_size)
+
+    # Persist the model architecture to config.json so inference (app.py) can
+    # rebuild the exact same model without relying on hard-coded constants.
+    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+    save_model_config(tokenizer.vocab_size, CHECKPOINT_DIR)
+
     # AdamW is the standard optimizer for transformer training.
     # It decouples weight decay from the gradient update step.
     optimizer = AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
@@ -416,7 +509,6 @@ def main() -> None:
     criterion = nn.CrossEntropyLoss()
 
     best_val_loss = float("inf")
-    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
     # Weights & Biases: log all hyperparameters + train/val loss + LR.
     wandb_run = None

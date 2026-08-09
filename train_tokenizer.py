@@ -1,7 +1,7 @@
 """Train a byte-level BPE tokenizer on the Italian corpus and save it for reuse.
 
 Usage:
-    python scripts/train_tokenizer.py [--vocab-size 50257] [--output lib/tokenizer.json]
+    python train_tokenizer.py [--vocab-size 50257] [--output models/tokenizer.json]
 
 The trained tokenizer is then picked up automatically by lib.tokenizer.Tokenizer
 whenever it is instantiated, replacing the GPT-2 fallback.
@@ -17,13 +17,13 @@ from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import ByteLevel as ByteLevelPreTokenizer
 from tokenizers.trainers import BpeTrainer
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.dataset import DatasetReader
 from lib.tokenizer import SPECIAL_TOKENS
 
 DEFAULT_VOCAB_SIZE = 50257
-DEFAULT_OUTPUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib", "tokenizer.json")
+DEFAULT_OUTPUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "tokenizer.json")
 DEFAULT_DATA_DIR = "data"
 
 

@@ -90,13 +90,14 @@ Se non usi lo script di inizializzazione, metti i file di testo in `data/` con e
 Prima di allenare il modello, genera un tokenizer BPE addestrato sul tuo corpus italiano.Questo produce token più efficienti per l'italiano rispetto al tokenizer GPT-2 (che è ottimizzato per l'inglese) e include già i token speciali per la chat.
 
 ```bash
-python scripts/train_tokenizer.py
+python train_tokenizer.py
 ```
 
 Opzioni disponibili:
 
 ```bash
-python scripts/train_tokenizer.py --vocab-size 50257 --data-dir data/ --output lib/tokenizer.json
+mkdir -p models/
+python train_tokenizer.py --vocab-size 50257 --data-dir data/ --output models/tokenizer.json
 ```
 
 Il tokenizer viene salvato in `lib/tokenizer.json` e viene caricato automaticamente da `lib/tokenizer.py` in tutti gli script del progetto. Durante l'addestramento del tokenizer vedrai barre di avanzamento per la lettura del corpus e le fasi interne del BPE (pre-processing, tokenize words, count pairs, compute merges).
@@ -108,7 +109,7 @@ Se non addestri un tokenizer personalizzato, il progetto usa il fallback GPT-2 a
 Dopodiché avvia il training:
 
 ```bash
-python train.py
+python train_transformer.py
 ```
 
 Questo script:

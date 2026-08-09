@@ -18,9 +18,10 @@ SPECIAL_TOKENS = [
     END_TURN_TOKEN,
 ]
 
-# If a tokenizer trained on the project corpus exists next to this module it is
-# used; otherwise we fall back to the pretrained GPT-2 tokenizer.
-_DEFAULT_TOKENIZER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tokenizer.json")
+# Default location for a tokenizer trained on the project corpus. By default
+# outputs (tokenizer.json, config.json, checkpoints) live under ./models.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DEFAULT_TOKENIZER_PATH = os.path.join(_PROJECT_ROOT, "models", "tokenizer.json")
 
 
 class Tokenizer:
