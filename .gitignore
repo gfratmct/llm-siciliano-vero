@@ -21,3 +21,4 @@ runs/
 .DS_Store
 
 models/
+!lib/models
